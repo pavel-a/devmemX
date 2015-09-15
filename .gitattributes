@@ -1,0 +1,11 @@
+.gitattributes export-ignore
+.gitignore export-ignore
+* text=auto
+*.sh eol=lf
+*.ac eol=lf
+*.am eol=lf
+*akefile eol=lf
+*.txt eol=crlf
+*.c eol=lf
+*.cpp eol=lf
+*.h eol=lf
