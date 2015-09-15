@@ -1,7 +1,15 @@
 # devmem2
-Program to read/write from/to any location in memory (from lartware, 2004).
 
-Homepage: http://www.lartmaker.nl/lartware/port/
+Program to read/write from/to any location in physical memory
+
+Home page: http://git.io/vZ5iD
+
+Platforms: Linux 2.6 - 3.x - 4.x
+
+
+Origin: https://github.com/VCTLabs/devmem2
+By lartware, 2004
+http://www.lartmaker.nl/lartware/port/
 
 Useful on ARM, especially on TI and other platforms with GPIO (eg,
 beaglebone, raspberrypi).  Seems to be required by TI SGX/PowerVR
