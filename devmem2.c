@@ -43,7 +43,7 @@ int main(int argc, char **argv)
 {
     int fd;
     void *map_base, *virt_addr;
-    unsigned long read_result, writeval;
+    unsigned long read_result = -1, writeval;
     uint64_t target;
     int access_type = 'w';
     int access_size = 0;
@@ -67,8 +67,9 @@ int main(int argc, char **argv)
         exit(0);
     }
 
+    errno = 0;
     target = strtoull(argv[1], &endp, 0);
-    if (target == 0 || target >= UINT64_MAX || (endp && 0 != *endp)) {
+    if (errno != 0 || (endp && 0 != *endp)) {
         printerr("Invalid memory address: %s\n", argv[1]);
         exit(2);
     }
@@ -79,26 +80,28 @@ int main(int argc, char **argv)
     }
 
     if (argc > 2) {
-        switch(argv[2][0]) {
-            case 'b':
-            case 'B':
-                access_type = 'b';
-                access_size = 1;
-                break;
-            case 'w':
-            case 'W':
-                access_type = 'w';
-                access_size = 4;
-                break;
-            case 'h':
-            case 'H':
-                access_type = 'h';
-                access_size = 2;
-                break;
-            default:
-                printerr("Illegal data type: %s\n", argv[2]);
-                exit(2);
-        }
+        access_type = argv[2][0];
+    }
+
+    switch(access_type) {
+        case 'b':
+        case 'B':
+            access_type = 'b';
+            access_size = 1;
+            break;
+        case 'w':
+        case 'W':
+            access_type = 'w';
+            access_size = 4;
+            break;
+        case 'h':
+        case 'H':
+            access_type = 'h';
+            access_size = 2;
+            break;
+        default:
+            printerr("Illegal data type: %s\n", argv[2]);
+            exit(2);
     }
 
     offset = (unsigned int)(target & (pagesize-1));
