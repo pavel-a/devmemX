@@ -22,9 +22,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program; if not, write to the Free Software
- * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
- *
+ * along with this program. If not, see <http://www.gnu.org/licenses/>.
  */
 
 #include <stdio.h>
@@ -33,6 +31,7 @@
 #include <string.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <ctype.h>
 #include <sys/types.h>
 #include <sys/mman.h>
 #include <stdint.h>
@@ -46,7 +45,7 @@ int main(int argc, char **argv)
     unsigned long read_result = -1, writeval;
     uint64_t target;
     int access_type = 'w';
-    int access_size = 0;
+    int access_size = 4;
     unsigned int pagesize = (unsigned)getpagesize(); /* or sysconf(_SC_PAGESIZE)  */
     unsigned int map_size = pagesize;
     unsigned offset;
@@ -74,34 +73,36 @@ int main(int argc, char **argv)
         exit(2);
     }
 
-    if ( (sizeof(off_t) < sizeof(int64_t)) && (target > UINT32_MAX) ) {
-        printerr("The address %s is too large. Try to rebuild in 64-bit mode.\n", argv[1]);
-        exit(2);
-    }
-
     if (argc > 2) {
-        access_type = argv[2][0];
+        access_type = tolower(argv[2][0]);
+        if (argv[2][1] )
+            access_type = '?';
     }
 
     switch(access_type) {
         case 'b':
-        case 'B':
-            access_type = 'b';
             access_size = 1;
             break;
         case 'w':
-        case 'W':
-            access_type = 'w';
             access_size = 4;
             break;
         case 'h':
-        case 'H':
-            access_type = 'h';
             access_size = 2;
             break;
         default:
             printerr("Illegal data type: %s\n", argv[2]);
             exit(2);
+    }
+
+    if ((target + access_size -1) < target) {
+        printerr("ERROR: rolling over end of memory\n");
+        exit(2);
+    }
+
+    if ( (sizeof(off_t) < sizeof(int64_t)) && (target > UINT32_MAX) ) {
+        printerr("The address %s is too large. Try to rebuild in 64-bit mode.\n", argv[1]);
+        // consider mmap2() instead of this check
+        exit(2);
     }
 
     offset = (unsigned int)(target & (pagesize-1));
@@ -123,7 +124,8 @@ int main(int argc, char **argv)
     //printf("/dev/mem opened.\n");
     //fflush(stdout);
 
-    map_base = mmap(0, map_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, target & ~((typeof(target))pagesize-1));
+    map_base = mmap(0, map_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 
+                    target & ~((typeof(target))pagesize-1));
     if (map_base == (void *) -1) {
         printerr("Error mapping (%d) : %s\n", errno, strerror(errno));
         exit(1);
@@ -133,7 +135,7 @@ int main(int argc, char **argv)
 
     virt_addr = map_base + offset;
 
-    if(argc > 3) {
+    if (argc > 3) {
         errno = 0;
         writeval = strtoul(argv[3], &endp, 0);
         if (errno || (endp && 0 != *endp)) {
@@ -141,7 +143,12 @@ int main(int argc, char **argv)
             exit(2);
         }
 
-        switch(access_type) {
+        if (access_size < sizeof(writeval) && 0 != (writeval >> (access_size * 8))) {
+            printerr("ERROR: Data value %s does not fit in %d byte(s)\n", argv[3], access_size);
+            exit(2);
+        }
+
+        switch (access_type) {
             case 'b':
                 *((uint8_t *) virt_addr) = writeval;
                 if (readback)
@@ -167,7 +174,7 @@ int main(int argc, char **argv)
     }
     else
     {
-        switch(access_type) {
+        switch (access_type) {
             case 'b':
                 read_result = *((uint8_t *) virt_addr);
                 break;
@@ -184,7 +191,7 @@ int main(int argc, char **argv)
         fflush(stdout);
     }
 
-    if(munmap(map_base, map_size) == -1) {
+    if (munmap(map_base, map_size) != 0) {
         printerr("ERROR munmap (%d) %s\n", errno, strerror(errno));
     }
 
