@@ -6,8 +6,6 @@ MANDIR ?= $(PREFIX)/share/man
 CC ?= "gcc"
 
 CFLAGS ?= -O2 -g -Wall
-# _GNU_SOURCE for various glibc extensions
-CFLAGS += -D_GNU_SOURCE
 
 SRC=devmem2.c
 
@@ -16,7 +14,10 @@ devmem2: $(SRC)
 
 install:
 	mkdir -p $(BINDIR)
-	install devmem2 $(BINDIR)
+	install devmem2 $(BINDIR) 
 
+installmem:
+	install -s -D $(BINDIR)/mem
+	
 clean:
 	rm -f devmem2 *.o *~

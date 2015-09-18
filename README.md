@@ -2,9 +2,9 @@
 
 Program to read/write from/to any location in physical memory
 
-Home page: http://git.io/vZ5iD
+Source and documentation: http://git.io/vZ5iD
 
-Platforms: Linux 2.6 - 3.x - 4.x
+For Linux 2.6 - 3.x - 4.x
 
 
 Origin: https://github.com/VCTLabs/devmem2

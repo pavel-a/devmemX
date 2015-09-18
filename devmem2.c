@@ -42,7 +42,7 @@ int main(int argc, char **argv)
 {
     int fd;
     void *map_base, *virt_addr;
-    unsigned long read_result = -1, writeval;
+    unsigned long read_result = -1, writeval=-1;
     uint64_t target;
     int access_type = 'w';
     int access_size = 4;
@@ -51,19 +51,45 @@ int main(int argc, char **argv)
     unsigned offset;
     char *endp = NULL;
     int readback = 0; // flag to read back after write
+    int align_check = 1; // flag to require alignment
 
     if (argc < 2) {
-        fprintf(stderr, "\nUsage:\t%s { address } [ type [ data ] ]\n"
+        fprintf(stderr, "\nUsage:\t%s [-switches] address [ type [ data ] ]\n"
             "\taddress : memory address to act upon\n"
             "\ttype    : access operation type : [b]yte, [h]alfword, [w]ord\n"
-            "\tdata    : data to be written\n\n",
+            "\tdata    : data to be written\n\n"
+            "Switches:\n"
+            "\t-r      : read back after write\n"
+            "\t-a      : do not check alignment\n"
+            "\t-v      : print version\n"
+            "\n",
             argv[0]);
         exit(1);
     }
 
-    if (strcasestr(argv[1], "-v")) {
-        printf("devmem version T/C x.1\n");
-        exit(0);
+    for ( ; argv[1][0] == '-'; argv++, argc--) {
+        if (0 == strcmp(argv[1], "-r")) {
+            readback = 1;
+            continue;
+        }
+        
+        if (0 == strcmp(argv[1], "-a")) {
+            align_check = 0;
+            continue;
+        }
+
+        if (0 == strcmp(argv[1], "-A")) {
+            // Absolute address mode. Does nothing now, for future compat.
+            continue;
+        }
+
+        if (0 == strncmp(argv[1], "-v", 2) || 0 == strncmp(argv[1], "--v", 3)) {
+            printf("devmem version T/C (http://git.io/vZ5iD) rev.0.2\n");
+            exit(0);
+        }
+        
+        printerr("Unknown option: %s\n", argv[1]);
+        exit(2);
     }
 
     errno = 0;
@@ -79,7 +105,7 @@ int main(int argc, char **argv)
             access_type = '?';
     }
 
-    switch(access_type) {
+    switch (access_type) {
         case 'b':
             access_size = 1;
             break;
@@ -100,8 +126,8 @@ int main(int argc, char **argv)
     }
 
     if ( (sizeof(off_t) < sizeof(int64_t)) && (target > UINT32_MAX) ) {
-        printerr("The address %s is too large. Try to rebuild in 64-bit mode.\n", argv[1]);
-        // consider mmap2() instead of this check
+        printerr("The address %s > 32 bits. Try to rebuild in 64-bit mode.\n", argv[1]);
+        // Consider mmap2() instead of this check
         exit(2);
     }
 
@@ -111,9 +137,9 @@ int main(int argc, char **argv)
         map_size += pagesize;
     }
 
-    if (offset & (access_size - 1)) {
-        printerr("WARNING: address not aligned on %d!\n", access_size);
-        //exit(2);
+    if (align_check && offset & (access_size - 1)) {
+        printerr("ERROR: address not aligned on %d!\n", access_size);
+        exit(2);
     }
 
     fd = open("/dev/mem", O_RDWR | O_SYNC);
@@ -124,7 +150,8 @@ int main(int argc, char **argv)
     //printf("/dev/mem opened.\n");
     //fflush(stdout);
 
-    map_base = mmap(0, map_size, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 
+    map_base = mmap(0, map_size, PROT_READ | PROT_WRITE, MAP_SHARED,
+                    fd, 
                     target & ~((typeof(target))pagesize-1));
     if (map_base == (void *) -1) {
         printerr("Error mapping (%d) : %s\n", errno, strerror(errno));
@@ -148,46 +175,41 @@ int main(int argc, char **argv)
             exit(2);
         }
 
-        switch (access_type) {
-            case 'b':
-                *((uint8_t *) virt_addr) = writeval;
-                if (readback)
-                    read_result = *((uint8_t *) virt_addr);
+        switch (access_size) {
+            case 1:
+                *((volatile uint8_t *) virt_addr) = writeval;
                 break;
-            case 'h':
-                *((uint16_t *) virt_addr) = writeval;
-                if (readback)
-                    read_result = *((uint16_t *) virt_addr);
+            case 2:
+                *((volatile uint16_t *) virt_addr) = writeval;
                 break;
-            case 'w':
-                *((uint32_t *) virt_addr) = writeval;
-                if (readback)
-                    read_result = *((uint32_t *) virt_addr);
+            case 4:
+                *((volatile uint32_t *) virt_addr) = writeval;
                 break;
         }
 
-        if (readback)
-            printf("Written 0x%lu; readback 0x%lu\n", writeval, read_result);
-        //else
         //    printf("Written 0x%lu\n", writeval);
         //fflush(stdout);
     }
-    else
-    {
-        switch (access_type) {
-            case 'b':
-                read_result = *((uint8_t *) virt_addr);
+    
+    if (argc < 3 || readback) {
+        switch (access_size) {
+            case 1:
+                read_result = *((volatile uint8_t *) virt_addr);
                 break;
-            case 'h':
-                read_result = *((uint16_t *) virt_addr);
+            case 2:
+                read_result = *((volatile uint16_t *) virt_addr);
                 break;
-            case 'w':
-                read_result = *((uint32_t *) virt_addr);
+            case 4:
+                read_result = *((volatile uint32_t *) virt_addr);
                 break;
         }
+
         //printf("Value at address 0x%lld (%p): 0x%lu\n", (long long)target, virt_addr, read_result);
         //fflush(stdout);
-        printf("%08lX\n", read_result);
+        if (readback)
+            printf("Written 0x%lx; readback 0x%lx\n", writeval, read_result);
+        else
+            printf("%08lX\n", read_result);
         fflush(stdout);
     }
 
