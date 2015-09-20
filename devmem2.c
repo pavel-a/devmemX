@@ -1,5 +1,5 @@
 /*
- * devmem2.c: Simple program to read/write from/to any location in memory.
+ * devmem.c: Simple program to read/write from/to any location in memory.
  *
  *  Copyright (C) 2000, Jan-Derk Bakker (jdb@lartmaker.nl)
  *
@@ -10,7 +10,8 @@
  * and Ubiquitous Communications (http://www.ubicom.tudelft.nl/)
  * projects.
  *
- *
+ *   Copyright (C) 2015, Trego Ltd.
+ *   
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
  * the Free Software Foundation; either version 2 of the License, or
@@ -34,9 +35,56 @@
 #include <ctype.h>
 #include <sys/types.h>
 #include <sys/mman.h>
-#include <stdint.h>
+#include <inttypes.h>
 
 #define printerr(fmt,...) do { fprintf(stderr, fmt, ## __VA_ARGS__); fflush(stderr); } while(0)
+
+#define VER_STR "devmem version T/C (http://git.io/vZ5iD) rev.0.9x"
+
+// This rebase thing is here to support shell scripts written for other system where the addresses are different.
+// To avoid rewriting old scripts or doing math in sh (brrr)  you can now set env. variables for old and new base address.
+// Old base ($DEVMEMREBASE) will be subtracted and new base ($DEVMEMBASE) will be added.
+// Or even simpler, use only offsets (0-based) and set the base in environment. We'll do the math for you.
+// 
+// TODO define the (real) limits to access with this program. 
+// Knowing the real limits will also let know whether the addresses are 32 or 64-bit.
+
+#define ENV_MBASE   "DEVMEMBASE"
+#define ENV_REBASE  "DEVMEMREBASE"
+#define ENV_PARAMS  "DEVMEMPARAMS"
+//#define ENV_ABSSTART "DEVMEMWIN"
+//#define ENV_ABSEND   "DEVMEMWINEND"
+
+// Global flags
+int f_readback = 0;       // flag to read back after write
+int f_align_check = 1;    // flag to require alignment
+int f_absolute = 0;       // legacy mode
+int f_dbg = 0;
+uint64_t mbase = UINT64_C(-1); // offset to add to the address parameter
+uint64_t mrebase = 0;     // address to rebase from (subtract)
+
+//uint64_t mabsstart = ~0U; // phys window start
+//uint64_t mabssize = ~0U;  // phys window size
+
+static void get_env_params(int fPrint);
+
+static void usage(const char *progname)
+{
+    fprintf(stderr, "\nUsage:\t%s [-switches] address [ type [ data ] ]\n"
+        "\taddress : memory address to act upon\n"
+        "\ttype    : access operation type : [b]yte, [h]alfword, [w]ord\n"
+        "\tdata    : data to be written\n\n"
+        "Switches:\n"
+        "\t-r      : read back after write\n"
+        "\t-a      : do not check alignment\n"
+        "\t-A      : \"old\" mode - use absolute addresses\n"
+        "\t--version | -V : print version\n"
+        "\t-d      : debug spew on (use to test the address rebasing)\n"
+        "\n",
+        progname);
+
+    get_env_params(1);
+}
 
 int main(int argc, char **argv)
 {
@@ -50,56 +98,60 @@ int main(int argc, char **argv)
     unsigned int map_size = pagesize;
     unsigned offset;
     char *endp = NULL;
-    int readback = 0; // flag to read back after write
-    int align_check = 1; // flag to require alignment
+    const char *progname = argv[0];
 
-    if (argc < 2) {
-        fprintf(stderr, "\nUsage:\t%s [-switches] address [ type [ data ] ]\n"
-            "\taddress : memory address to act upon\n"
-            "\ttype    : access operation type : [b]yte, [h]alfword, [w]ord\n"
-            "\tdata    : data to be written\n\n"
-            "Switches:\n"
-            "\t-r      : read back after write\n"
-            "\t-a      : do not check alignment\n"
-            "\t-v      : print version\n"
-            "\n",
-            argv[0]);
-        exit(1);
-    }
-
-    for ( ; argv[1][0] == '-'; argv++, argc--) {
-        if (0 == strcmp(argv[1], "-r")) {
-            readback = 1;
+    for ( ; argc > 1 && argv[1][0] == '-'; argv++, argc--) {
+        const char * psw = argv[1];
+        if (0 == strcmp(psw, "-r")) {
+            f_readback = 1;
             continue;
         }
         
-        if (0 == strcmp(argv[1], "-a")) {
-            align_check = 0;
+        if (0 == strcmp(psw, "-a")) {
+            f_align_check = 0;
             continue;
         }
 
-        if (0 == strcmp(argv[1], "-A")) {
-            // Absolute address mode. Does nothing now, for future compat.
+        if (0 == strcmp(psw, "-A")) {
+            f_absolute = 1;
+            //? f_align_check = 0;
             continue;
         }
 
-        if (0 == strncmp(argv[1], "-v", 2) || 0 == strncmp(argv[1], "--v", 3)) {
-            printf("devmem version T/C (http://git.io/vZ5iD) rev.0.2\n");
+        if (0 == strcmp(psw, "-d")) {
+            f_dbg = 1;
+            continue;
+        }
+        
+        if (0 == strncmp(psw, "--vers", 6) || 0 == strcmp(psw, "-V")) {
+            printf(VER_STR "\n");
             exit(0);
         }
         
-        printerr("Unknown option: %s\n", argv[1]);
+        if (0 == strcmp(psw, "--help") || 0 == strcmp(psw, "-?")) {
+            argc = 0;
+            break;
+        }
+        
+        printerr("Unknown option: %s\n", psw);
         exit(2);
     }
 
-    errno = 0;
-    target = strtoull(argv[1], &endp, 0);
-    if (errno != 0 || (endp && 0 != *endp)) {
-        printerr("Invalid memory address: %s\n", argv[1]);
-        exit(2);
+    if (argc < 2) {
+        usage(progname);
+        exit(1);
     }
-
+    
+    get_env_params(0);
+    
     if (argc > 2) {
+        if (isalpha(argv[1][0])) {
+            // Allow access_type be 1st arg, then swap 1st and 2nd
+            char *t = argv[2];
+            argv[2] = argv[1];
+            argv[1] = t;
+        }
+
         access_type = tolower(argv[2][0]);
         if (argv[2][1] )
             access_type = '?';
@@ -120,13 +172,42 @@ int main(int argc, char **argv)
             exit(2);
     }
 
+    errno = 0;
+    target = strtoull(argv[1], &endp, 0);
+    if (errno != 0 || (endp && 0 != *endp)) {
+        printerr("Invalid memory address: %s\n", argv[1]);
+        exit(2);
+    }
+
+    if ( ! f_absolute ) {
+        // Subtract old offset and add new offset:
+        uint64_t t2;
+        if (target >= mrebase) {
+            target -= mrebase;
+            // TODO check upper limit ??
+            
+            t2 = target + mbase;
+            
+            if (f_dbg) {
+                printerr("Address rebased: %#" PRIX64 "->%#" PRIX64 "\n", target, t2);
+            }
+            if (t2 < target) {
+                printerr("ERROR: addr rollover after rebase! (64-bit)\n");
+                exit(2);
+            }
+            
+            target = t2;
+        }
+        // ELSE... target < rebase addr....  Warn or pass??
+    }
+    
     if ((target + access_size -1) < target) {
         printerr("ERROR: rolling over end of memory\n");
         exit(2);
     }
 
     if ( (sizeof(off_t) < sizeof(int64_t)) && (target > UINT32_MAX) ) {
-        printerr("The address %s > 32 bits. Try to rebuild in 64-bit mode.\n", argv[1]);
+        printerr("The address %#" PRIX64 " > 32 bits. Try to rebuild in 64-bit mode.\n", target);
         // Consider mmap2() instead of this check
         exit(2);
     }
@@ -137,7 +218,7 @@ int main(int argc, char **argv)
         map_size += pagesize;
     }
 
-    if (align_check && offset & (access_size - 1)) {
+    if (f_align_check && offset & (access_size - 1)) {
         printerr("ERROR: address not aligned on %d!\n", access_size);
         exit(2);
     }
@@ -191,7 +272,7 @@ int main(int argc, char **argv)
         //fflush(stdout);
     }
     
-    if (argc < 3 || readback) {
+    if (argc <= 3 || f_readback) {
         switch (access_size) {
             case 1:
                 read_result = *((volatile uint8_t *) virt_addr);
@@ -206,7 +287,7 @@ int main(int argc, char **argv)
 
         //printf("Value at address 0x%lld (%p): 0x%lu\n", (long long)target, virt_addr, read_result);
         //fflush(stdout);
-        if (readback)
+        if (f_readback)
             printf("Written 0x%lx; readback 0x%lx\n", writeval, read_result);
         else
             printf("%08lX\n", read_result);
@@ -219,5 +300,111 @@ int main(int argc, char **argv)
 
     close(fd);
 
+    if (f_dbg)
+        printerr("done\n");
+
     return 0;
+}
+
+static void get_env_params(int a_print)
+{
+    char *p;
+    uint64_t v64;
+    char *endp = NULL;
+    int errors = 0;
+    int fPrint = f_dbg || a_print;
+    
+    if (fPrint)
+        printf("\n\nEnvironment parameters:\n");
+    
+    p = getenv(ENV_PARAMS);
+    if (p) {
+        if(fPrint)
+            printf("%s = \"%s\" (all ignored!)\n", ENV_PARAMS, p);
+        
+        // TODO parse params
+    }
+    else if (fPrint)
+        printf("%s not set\n", ENV_PARAMS);
+        
+    p = getenv(ENV_MBASE);
+    if (p) {
+        errno = 0;
+        v64 = strtoull(p, &endp, 16);
+        if (errno != 0 || (endp && 0 != *endp)) {
+            printerr("Error in %s value: %s\n", ENV_MBASE, p);
+            errors++;
+        }
+        else {
+            mbase = v64;
+            if (fPrint)
+                printf("%s = %#" PRIX64 "\n", ENV_MBASE, mbase );
+        }
+    }
+    else if (fPrint)
+        printf("%s not set\n", ENV_MBASE);
+    
+    p = getenv(ENV_REBASE);
+    if (p) {
+        errno = 0;
+        v64 = strtoull(p, &endp, 16);
+        if (errno != 0 || (endp && 0 != *endp)) {
+            printerr("Error in %s value: %s\n", ENV_REBASE, p);
+            errors++;
+        }
+        else {
+            mrebase = v64;
+            if (fPrint)
+                printf("%s = %#" PRIX64 "\n", ENV_REBASE, mrebase );
+        }
+    }
+    else if (fPrint)
+        printf("%s not set\n", ENV_REBASE);
+#if 0
+    p = getenv(ENV_MSIZE);
+    if (p) {
+        errno = 0;
+        v64 = strtoull(p, &endp, 16);
+        if (errno != 0 || (endp && 0 != *endp)) {
+            printerr("Error in %s value: %s\n", ENV_MSIZE, p);
+            errors++;
+        }
+        else {
+            msize = (uint32_t)v64;
+            if (fPrint)
+                printf("%s = %#" PRIX32 "\n", ENV_MSIZE, msize );
+        }
+    }
+    else if (fPrint)
+        printf("%s not set\n", ENV_MSIZE);
+
+    p = getenv(ENV_RESIZE);
+    if (p) {
+        errno = 0;
+        v64 = strtoull(p, &endp, 16);
+        if (errno != 0 || (endp && 0 != *endp)) {
+            printerr("Error in %s value: %s\n", ENV_RESIZE, p);
+            errors++;
+        }
+        else {
+            mresize = (uint32_t)v64;
+            if (fPrint)
+                printf("%s = %#" PRIX32 "\n", ENV_RESIZE, mresize );
+        }
+    }
+    else if (fPrint)
+        printf("%s not set\n", ENV_RESIZE);
+#endif    
+    if ( !a_print ) {
+        if (errors) {
+            printerr("Errors found in environment parameters\n");
+            exit(2);
+        }
+        
+        if ( !f_absolute && (mbase == UINT64_C(-1))) {
+            printerr("Env. parameter %s must be set, or use absolute mode switch -A\n", 
+               ENV_MBASE);
+            exit(2);
+        }
+    }
 }
