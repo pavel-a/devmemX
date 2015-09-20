@@ -34,9 +34,25 @@
 #include <ctype.h>
 #include <sys/types.h>
 #include <sys/mman.h>
-#include <stdint.h>
+#include <inttypes.h>
 
 #define printerr(fmt,...) do { fprintf(stderr, fmt, ## __VA_ARGS__); fflush(stderr); } while(0)
+
+#define VER_STR "devmem version T/C (http://git.io/vZ5iD) rev.0.3"
+
+void usage(const char *progname)
+{
+    fprintf(stderr, "\nUsage:\t%s [-switches] address [ type [ data ] ]\n"
+        "\taddress : memory address to act upon\n"
+        "\ttype    : access operation type : [b]yte, [h]alfword, [w]ord\n"
+        "\tdata    : data to be written\n\n"
+        "Switches:\n"
+        "\t-r      : read back after write\n"
+        "\t-a      : do not check alignment\n"
+        "\t--version | -V : print version\n"
+        "\n",
+        progname);
+}
 
 int main(int argc, char **argv)
 {
@@ -50,31 +66,18 @@ int main(int argc, char **argv)
     unsigned int map_size = pagesize;
     unsigned offset;
     char *endp = NULL;
-    int readback = 0; // flag to read back after write
-    int align_check = 1; // flag to require alignment
+    int f_readback = 0; // flag to read back after write
+    int f_align_check = 1; // flag to require alignment
+    const char *progname = argv[0];
 
-    if (argc < 2) {
-        fprintf(stderr, "\nUsage:\t%s [-switches] address [ type [ data ] ]\n"
-            "\taddress : memory address to act upon\n"
-            "\ttype    : access operation type : [b]yte, [h]alfword, [w]ord\n"
-            "\tdata    : data to be written\n\n"
-            "Switches:\n"
-            "\t-r      : read back after write\n"
-            "\t-a      : do not check alignment\n"
-            "\t-v      : print version\n"
-            "\n",
-            argv[0]);
-        exit(1);
-    }
-
-    for ( ; argv[1][0] == '-'; argv++, argc--) {
+    for ( ; argc > 1 && argv[1][0] == '-'; argv++, argc--) {
         if (0 == strcmp(argv[1], "-r")) {
-            readback = 1;
+            f_readback = 1;
             continue;
         }
         
         if (0 == strcmp(argv[1], "-a")) {
-            align_check = 0;
+            f_align_check = 0;
             continue;
         }
 
@@ -83,13 +86,36 @@ int main(int argc, char **argv)
             continue;
         }
 
-        if (0 == strncmp(argv[1], "-v", 2) || 0 == strncmp(argv[1], "--v", 3)) {
-            printf("devmem version T/C (http://git.io/vZ5iD) rev.0.2\n");
+        if (0 == strncmp(argv[1], "--vers", 6) || 0 == strcmp(argv[1], "-V")) {
+            printf(VER_STR "\n");
             exit(0);
+        }
+
+        if (0 == strcmp(argv[1], "--help")) {
+            argc = 0;
+            break;
         }
         
         printerr("Unknown option: %s\n", argv[1]);
         exit(2);
+    }
+
+    if (argc < 2) {
+        usage(progname);
+        exit(1);
+    }
+
+    if (argc > 2) {
+        if (isalpha(argv[1][0])) {
+            // Allow access_type be 1st arg, then swap 1st and 2nd
+            char *t = argv[2];
+            argv[2] = argv[1];
+            argv[1] = t;
+        }
+
+        access_type = tolower(argv[2][0]);
+        if (argv[2][1] )
+            access_type = '?';
     }
 
     errno = 0;
@@ -97,12 +123,6 @@ int main(int argc, char **argv)
     if (errno != 0 || (endp && 0 != *endp)) {
         printerr("Invalid memory address: %s\n", argv[1]);
         exit(2);
-    }
-
-    if (argc > 2) {
-        access_type = tolower(argv[2][0]);
-        if (argv[2][1] )
-            access_type = '?';
     }
 
     switch (access_type) {
@@ -137,7 +157,7 @@ int main(int argc, char **argv)
         map_size += pagesize;
     }
 
-    if (align_check && offset & (access_size - 1)) {
+    if (f_align_check && offset & (access_size - 1)) {
         printerr("ERROR: address not aligned on %d!\n", access_size);
         exit(2);
     }
@@ -191,7 +211,7 @@ int main(int argc, char **argv)
         //fflush(stdout);
     }
     
-    if (argc < 3 || readback) {
+    if (argc <= 3 || f_readback) {
         switch (access_size) {
             case 1:
                 read_result = *((volatile uint8_t *) virt_addr);
@@ -206,7 +226,7 @@ int main(int argc, char **argv)
 
         //printf("Value at address 0x%lld (%p): 0x%lu\n", (long long)target, virt_addr, read_result);
         //fflush(stdout);
-        if (readback)
+        if (f_readback)
             printf("Written 0x%lx; readback 0x%lx\n", writeval, read_result);
         else
             printf("%08lX\n", read_result);
