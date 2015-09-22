@@ -2,6 +2,7 @@
 
 Program to read/write from/to any location in physical memory
 
+This is enhanced variant of "devmem" or "devmem2" utility.
 Source and documentation: http://git.io/vZ5iD
 
 For Linux 2.6 - 3.x - 4.x

@@ -10,6 +10,7 @@
  * and Ubiquitous Communications (http://www.ubicom.tudelft.nl/)
  * projects.
  *
+ *   Copyright (C) 2015, Trego Ltd.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -38,9 +39,11 @@
 
 #define printerr(fmt,...) do { fprintf(stderr, fmt, ## __VA_ARGS__); fflush(stderr); } while(0)
 
-#define VER_STR "devmem version T/C (http://git.io/vZ5iD) rev.0.3"
+#define VER_STR "devmem version T/C (http://git.io/vZ5iD) rev.0.3b"
 
-void usage(const char *progname)
+int f_dbg = 0;
+
+static void usage(const char *cmd)
 {
     fprintf(stderr, "\nUsage:\t%s [-switches] address [ type [ data ] ]\n"
         "\taddress : memory address to act upon\n"
@@ -51,7 +54,7 @@ void usage(const char *progname)
         "\t-a      : do not check alignment\n"
         "\t--version | -V : print version\n"
         "\n",
-        progname);
+        cmd);
 }
 
 int main(int argc, char **argv)
@@ -69,44 +72,52 @@ int main(int argc, char **argv)
     int f_readback = 0; // flag to read back after write
     int f_align_check = 1; // flag to require alignment
     const char *progname = argv[0];
+    int opt;
 
-    for ( ; argc > 1 && argv[1][0] == '-'; argv++, argc--) {
-        if (0 == strcmp(argv[1], "-r")) {
+    opterr = 0;
+    while ((opt = getopt(argc, argv, "+raAdV")) != -1) {
+        switch(opt) {
+        case 'r':
             f_readback = 1;
-            continue;
-        }
-        
-        if (0 == strcmp(argv[1], "-a")) {
+            break;
+        case 'a':
             f_align_check = 0;
-            continue;
+            break;
+        case 'A':    
+            // Absolute address mode. Does nothing now, for future compat.;
+            break;
+        case 'd':
+            f_dbg = 1;
+            break;
+        case 'V':    
+            printf(VER_STR "\n");
+            exit(0);
+        default:   
+            if ( (!argv[optind]) || 0 == strcmp(argv[optind], "--help")) {
+                usage(progname);
+                exit(1);
         }
 
-        if (0 == strcmp(argv[1], "-A")) {
-            // Absolute address mode. Does nothing now, for future compat.
-            continue;
-        }
-
-        if (0 == strncmp(argv[1], "--vers", 6) || 0 == strcmp(argv[1], "-V")) {
+            if (0 == strncmp(argv[optind], "--vers", 6)) {
             printf(VER_STR "\n");
             exit(0);
         }
 
-        if (0 == strcmp(argv[1], "--help")) {
-            argc = 0;
-            break;
-        }
         
-        printerr("Unknown option: %s\n", argv[1]);
+            printerr("Unknown long option: %s\n", argv[optind]);
         exit(2);
+        }
     }
 
-    if (argc < 2) {
+    if (optind >= argc) {
         usage(progname);
         exit(1);
     }
 
+    argc -= optind - 1;
+    argv += optind - 1;
     if (argc > 2) {
-        if (isalpha(argv[1][0])) {
+        if (!isdigit(argv[1][0])) {
             // Allow access_type be 1st arg, then swap 1st and 2nd
             char *t = argv[2];
             argv[2] = argv[1];
@@ -157,6 +168,9 @@ int main(int argc, char **argv)
         map_size += pagesize;
     }
 
+    if (f_dbg) {
+        printerr("Address: %#" PRIX64 " op.size=%d\n", target, access_size);
+    }
     if (f_align_check && offset & (access_size - 1)) {
         printerr("ERROR: address not aligned on %d!\n", access_size);
         exit(2);
@@ -207,8 +221,10 @@ int main(int argc, char **argv)
                 break;
         }
 
-        //    printf("Written 0x%lu\n", writeval);
-        //fflush(stdout);
+        if (f_dbg) {
+            printerr("Address: %#" PRIX64 " Written: %#lX\n", target, writeval);
+            fflush(stdout);
+        }
     }
     
     if (argc <= 3 || f_readback) {
@@ -226,7 +242,7 @@ int main(int argc, char **argv)
 
         //printf("Value at address 0x%lld (%p): 0x%lu\n", (long long)target, virt_addr, read_result);
         //fflush(stdout);
-        if (f_readback)
+        if (f_readback && argc > 3)
             printf("Written 0x%lx; readback 0x%lx\n", writeval, read_result);
         else
             printf("%08lX\n", read_result);
