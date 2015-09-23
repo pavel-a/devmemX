@@ -7,19 +7,19 @@ CC ?= "gcc"
 
 CFLAGS ?= -O2 -g -Wall
 
-SRC=devmem2.c
+SRC=devmemx.c memaccess.c
 
-devmem2: $(SRC)
+devmemx: $(SRC)
 	$(CC) $(CFLAGS) $(LDFLAGS) $(LIBS) -o $@ $(SRC)
 
 # Install as "devmem2"
-install2:
+install2: devmemx
 	mkdir -p $(BINDIR)
-	install devmem2 $(BINDIR)
+	install -s -D devmem $(BINDIR)/devmem2
 
 # Rename to "mem" :  we like it this way.
-install:
-	install -s -D devmem2 $(BINDIR)/mem
+install: devmemx
+	install -s -D devmemx $(BINDIR)/mem
 	
 clean:
-	rm -f devmem2 *.o *~
+	rm -f devmemx *.o *~
