@@ -41,7 +41,7 @@
 
 #define printerr(fmt,...) do { fprintf(stderr, fmt, ## __VA_ARGS__); fflush(stderr); } while(0)
 
-#define VER_STR "devmem version T/C (http://git.io/vZ5iD) rev.1.00x"
+#define VER_STR "devmem version T/C (http://git.io/vZ5iD) rev.1.01x"
 
 // Global flags
 int f_readback = 0;       // flag to read back after write
@@ -113,7 +113,7 @@ int main(int argc, char **argv)
         }
     }
 
-    if (optind >= argc) {
+    if (optind >= argc || argc > 4) {
         usage(progname);
         exit(1);
     }
