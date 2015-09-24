@@ -78,10 +78,10 @@ mem_mapping_hnd mem_create_mapping(mem_phys_address_t target, mem_mapping_size_t
     struct mapping_s *mp = &g_map;
     mem_phys_address_t translated;
 
-    errno = 0;
+    errno = -1;
     if (mp->fd > 0) {
         printerr("Only one mapping supported and it is already in use.\n");
-        errno = -ENOTSUP;
+        errno = ENOTSUP;
         return 0;
     }
     
@@ -90,7 +90,7 @@ mem_mapping_hnd mem_create_mapping(mem_phys_address_t target, mem_mapping_size_t
     if ( !(flags & MF_ABSOLUTE) && (mbase == UINT64_C(-1))) {
         printerr("Env. parameter %s must be set, or use absolute mode switch -A\n", 
            ENV_MBASE);
-        errno = -EINVAL;   
+        errno = EINVAL;   
         return 0;
     }
 
@@ -105,7 +105,7 @@ mem_mapping_hnd mem_create_mapping(mem_phys_address_t target, mem_mapping_size_t
         mp->abs_mode = 0;
         if ( translated < target ) {
             printerr("ERROR: rolling over end of memory\n");
-            errno = -ERANGE;
+            errno = ERANGE;
             return 0;
         }
     }
@@ -118,14 +118,14 @@ mem_mapping_hnd mem_create_mapping(mem_phys_address_t target, mem_mapping_size_t
     mp->mmap_size = (offset + size ) / pagesize + pagesize;
     if ( mp->phys_addr + mp->mmap_size <= mp->phys_addr ) {
         printerr("ERROR: rolling over end of memory\n");
-        errno = -ERANGE;
+        errno = ERANGE;
         return 0;
     }
 
     if ( (sizeof(off_t) < sizeof(int64_t)) && (mp->phys_addr + mp->mmap_size) > UINT32_MAX ) {
         printerr("The address %#" PRIX64 " > 32 bits. Try to rebuild in 64-bit mode.\n", mp->phys_addr);
         // Consider mmap2() instead of this check
-        errno = -ERANGE;
+        errno = ERANGE;
         return 0;
     }
     
@@ -144,7 +144,7 @@ mem_mapping_hnd mem_create_mapping(mem_phys_address_t target, mem_mapping_size_t
                     mp->phys_addr);
     if (mp->mmap_base == (void *) -1) {
         printerr("Error mapping (%d) : %s\n", errno, strerror(errno));
-        exit(1);
+        return 0;
     }
     
     if (f_dbg) {
