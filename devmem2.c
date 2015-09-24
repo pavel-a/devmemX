@@ -39,7 +39,7 @@
 
 #define printerr(fmt,...) do { fprintf(stderr, fmt, ## __VA_ARGS__); fflush(stderr); } while(0)
 
-#define VER_STR "devmem version T/C (http://git.io/vZ5iD) rev.0.3b"
+#define VER_STR "devmem version T/C (http://git.io/vZ5iD) rev.0.3c"
 
 int f_dbg = 0;
 
@@ -109,7 +109,7 @@ int main(int argc, char **argv)
         }
     }
 
-    if (optind >= argc) {
+    if (optind >= argc || argc > 4) {
         usage(progname);
         exit(1);
     }
