@@ -20,32 +20,30 @@
 #include "memaccess.h" /* self */
 
 #define _MEMACCESS_LIB_VER_MJ 0
-#define _MEMACCESS_LIB_VER_MN 95
+#define _MEMACCESS_LIB_VER_MN 96
 
 // This rebase thing is here to support shell scripts written for other system where the addresses are different.
-// To avoid rewriting old scripts or doing math in sh (brrr)  you can now set env. variables for old and new base address.
-// Old base ($DEVMEMREBASE) will be subtracted and new base ($DEVMEMBASE) will be added.
-// Or even simpler, use only offsets (0-based) and set the base in environment. We'll do the math for you.
+// To avoid rewriting old scripts, you can now set env. variables for old and new base address.
+// For adresses in [$DEVMEMREBASE...  $DEVMEMREBASEEND] $DEVMEMREBASE will be subtracted and $DEVMEMBASE will be added.
+// You can use only offsets (0-based) and set $DEVMEMREBASE=0 and $DEVMEMBASE = real base
 
 #define ENV_MBASE   "DEVMEMBASE"
+#define ENV_MEM_END "DEVMEMEND"
 #define ENV_REBASE  "DEVMEMREBASE"
+#define ENV_REBASE_END "DEVMEMREBASEEND"
 #define ENV_PARAMS  "DEVMEMOPT"
-
-// TODO define the (real) limits to access with this program. 
-// Knowing the real limits will also let know whether the addresses are 32 or 64-bit.
-//#define ENV_ABSSTART "DEVMEMWIN"
-//#define ENV_ABSEND   "DEVMEMWINEND"
-//uint64_t mabsstart = ~0U; // phys window start
-//uint64_t mabssize = ~0U;  // phys window size
 
 static int f_dbg = 0;
 static FILE *dbgf = NULL;
 static unsigned int pagesize;
-static uint64_t mbase = UINT64_C(-1); // offset to add to the address parameter
-static uint64_t mrebase = 0;     // address to rebase from (subtract this from given address)
+static uint64_t mbase = UINT64_C(~0); // start of the real address window
+static uint64_t m_end = UINT64_C(~0); // end of the real address window
+static int fRebase = 0;
+static uint64_t mrebase = 0;          // address to rebase from (subtract this from given address)
+static uint64_t mrebase_end = UINT64_C(~0); // end address subject to rebase
 
 struct mapping_s {
-    int fd;          // 0 when not initialized
+    int fd;          // 0 when not initialized, -1 = invalid
     mem_phys_address_t phys_addr;
     void *mmap_base;
     off_t mmap_size;
@@ -53,7 +51,7 @@ struct mapping_s {
     int offs_mode;
 };
 
-static struct mapping_s g_map; //  a singleton, duh. /me doesn't know any other patterns.
+static struct mapping_s g_map; //  singleton is my favorite pattern. duh.
 
 #define printerr(fmt,...) while(dbgf){ fprintf(dbgf, fmt, ## __VA_ARGS__); fflush(dbgf); break; } 
 
@@ -63,12 +61,10 @@ static int get_env_params(void);
 static mem_phys_address_t  _transl_phys_addr(mem_phys_address_t a_from)
 {
     mem_phys_address_t t2 = a_from;
-    if (a_from >= mrebase) {
+    if (fRebase && a_from >= mrebase && a_from <= mrebase_end) {
         t2 -= mrebase;
         t2 += mbase;
     }
-    // else ???
-    // TODO check upper limit ??
     return t2;
 }
 
@@ -87,14 +83,14 @@ mem_mapping_hnd mem_create_mapping(mem_phys_address_t target, mem_mapping_size_t
     
     // MF_ABSOLUTE flag exists only for devmem 'classic' mode. Other utilities should not need it.
     mp->abs_mode = !!(flags & MF_ABSOLUTE);
-    if ( !(flags & MF_ABSOLUTE) && (mbase == UINT64_C(-1))) {
+    if ( !(flags & MF_ABSOLUTE) && (mbase == UINT64_C(~0))) {
         printerr("Env. parameter %s must be set, or use absolute mode switch -A\n", 
            ENV_MBASE);
         errno = EINVAL;   
         return 0;
     }
 
-    // MF_PHYSICAL flag exists for utilities that use "physical" addresses. New utilities should pass offsets (0-based) instead.
+    // MF_PHYSICAL flag exists for utilities like devmem, that use "physical" addresses. New utilities should pass offsets (0-based) instead.
     if (flags & MF_PHYSICAL) {
         mp->offs_mode = 0;
         translated = target;
@@ -112,6 +108,12 @@ mem_mapping_hnd mem_create_mapping(mem_phys_address_t target, mem_mapping_size_t
 
     if (!mp->abs_mode) 
         translated = _transl_phys_addr(target);
+        
+    if ( !(translated >= mbase || translated <= m_end) ) {
+        printerr("ERROR: address out of allowed window\n");
+        errno = EINVAL;
+        return 0;
+    }
     
     mp->phys_addr = translated & ~((typeof(translated))pagesize-1);
     mem_mapping_size_t offset = translated - mp->phys_addr;
@@ -121,10 +123,10 @@ mem_mapping_hnd mem_create_mapping(mem_phys_address_t target, mem_mapping_size_t
         errno = ERANGE;
         return 0;
     }
-
+    
+    // Note: usermode off_t can be 32 bit even if kernel phys. address is 64-bit. Consider mmap2() instead of this check
     if ( (sizeof(off_t) < sizeof(int64_t)) && (mp->phys_addr + mp->mmap_size) > UINT32_MAX ) {
         printerr("The address %#" PRIX64 " > 32 bits. Try to rebuild in 64-bit mode.\n", mp->phys_addr);
-        // Consider mmap2() instead of this check
         errno = ERANGE;
         return 0;
     }
@@ -260,14 +262,15 @@ static int get_env_params(void)
     int errors = 0;
     int fPrint = f_dbg;
     
+    if (!dbgf) {
+        dbgf = stderr; // revise?
+    }
+
     p = getenv(ENV_PARAMS);
     if (p) {
         if (strstr(p, "+d")) { // Debug
             f_dbg++;
             fPrint++;
-            if (!dbgf) {
-                dbgf = stderr; // revise?
-            }
         }
 
         if (strstr(p, "-NDM")) { // kill switch
@@ -303,6 +306,28 @@ static int get_env_params(void)
     else if (fPrint)
         printf("%s not set\n", ENV_MBASE);
     
+    p = getenv(ENV_MEM_END);
+    if (p) {
+        errno = 0;
+        v64 = strtoull(p, &endp, 16);
+        if (errno != 0 || (endp && 0 != *endp)) {
+            printerr("Error in %s value: %s\n", ENV_MEM_END, p);
+            errors++;
+        }
+        else {
+            m_end = v64;
+            if (fPrint)
+                printf("%s = %#" PRIX64 "\n", ENV_MEM_END, mbase );
+        }
+    }
+    else if (fPrint)
+        printf("%s not set\n", ENV_MBASE);
+        
+    if (m_end <= mbase) {
+        printerr("Error: end memory %s <= base %s\n", ENV_MEM_END, ENV_MBASE);
+        errors++;
+    }    
+    
     p = getenv(ENV_REBASE);
     if (p) {
         errno = 0;
@@ -312,6 +337,7 @@ static int get_env_params(void)
             errors++;
         }
         else {
+            fRebase = 1;
             mrebase = v64;
             if (fPrint)
                 printf("%s = %#" PRIX64 "\n", ENV_REBASE, mrebase );
@@ -319,6 +345,28 @@ static int get_env_params(void)
     }
     else if (fPrint)
         printf("%s not set\n", ENV_REBASE);
+
+    p = getenv(ENV_REBASE_END);
+    if (p) {
+        errno = 0;
+        v64 = strtoull(p, &endp, 16);
+        if (errno != 0 || (endp && 0 != *endp)) {
+            printerr("Error in %s value: %s\n", ENV_REBASE_END, p);
+            errors++;
+        }
+        else {
+            mrebase_end = v64;
+            if (fPrint)
+                printf("%s = %#" PRIX64 "\n", ENV_REBASE_END, mrebase_end );
+        }
+    }
+    else if (fPrint)
+        printf("%s not set\n", ENV_REBASE_END);
+
+    if (fRebase && mrebase_end <= mrebase) {
+        printerr("Error: end rebase %s <= start %s\n", ENV_REBASE_END, ENV_REBASE);
+        errors++;
+    }    
 
     if (errors) {
         if ( fPrint ) {
