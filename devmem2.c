@@ -92,20 +92,19 @@ int main(int argc, char **argv)
         case 'V':    
             printf(VER_STR "\n");
             exit(0);
-        default:   
+        default:
             if ( (!argv[optind]) || 0 == strcmp(argv[optind], "--help")) {
                 usage(progname);
                 exit(1);
-        }
+            }
 
             if (0 == strncmp(argv[optind], "--vers", 6)) {
-            printf(VER_STR "\n");
-            exit(0);
-        }
+                  printf(VER_STR "\n");
+                  exit(0);
+            }
 
-        
-            printerr("Unknown long option: %s\n", argv[optind]);
-        exit(2);
+             printerr("Unknown long option: %s\n", argv[optind]);
+             exit(2);
         }
     }
 
