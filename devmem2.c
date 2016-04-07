@@ -39,7 +39,7 @@
 
 #define printerr(fmt,...) do { fprintf(stderr, fmt, ## __VA_ARGS__); fflush(stderr); } while(0)
 
-#define VER_STR "devmem version T/C (http://git.io/vZ5iD) rev.0.3c"
+#define VER_STR "devmem version T/C (http://git.io/vZ5iD) rev.0.3e"
 
 int f_dbg = 0;
 
@@ -108,13 +108,14 @@ int main(int argc, char **argv)
         }
     }
 
-    if (optind >= argc || argc > 4) {
+    argc -= optind - 1;
+    argv += optind - 1;
+
+    if (argc < 2 || argc > 4) {
         usage(progname);
         exit(1);
     }
 
-    argc -= optind - 1;
-    argv += optind - 1;
     if (argc > 2) {
         if (!isdigit(argv[1][0])) {
             // Allow access_type be 1st arg, then swap 1st and 2nd
