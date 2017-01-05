@@ -12,6 +12,6 @@ Origin: https://github.com/VCTLabs/devmem2
 By lartware, 2004
 http://www.lartmaker.nl/lartware/port/
 
-This variant is not 100% compatible wit the original, do not use it as a drop-in replacement.
+This variant is not 100% compatible with the original, do not use it as a drop-in replacement.
 
 See the wiki in this github repo for details on usage and building.
