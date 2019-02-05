@@ -61,7 +61,7 @@ int main(int argc, char **argv)
 {
     int fd;
     void *map_base, *virt_addr;
-    unsigned long read_result = -1, writeval=-1;
+    uint64_t read_result = -1, writeval=-1;
     uint64_t target;
     int access_type = 'w';
     int access_size = 4;
@@ -140,11 +140,14 @@ int main(int argc, char **argv)
         case 'b':
             access_size = 1;
             break;
+        case 'h':
+            access_size = 2;
+            break;
         case 'w':
             access_size = 4;
             break;
-        case 'h':
-            access_size = 2;
+        case 'q':
+            access_size = 8;
             break;
         default:
             printerr("Illegal data type: %s\n", argv[2]);
@@ -198,7 +201,7 @@ int main(int argc, char **argv)
 
     if (argc > 3) {
         errno = 0;
-        writeval = strtoul(argv[3], &endp, 0);
+        writeval = strtoull(argv[3], &endp, 0);
         if (errno || (endp && 0 != *endp)) {
             printerr("Invalid data value: %s\n", argv[3]);
             exit(2);
@@ -219,6 +222,9 @@ int main(int argc, char **argv)
             case 4:
                 *((volatile uint32_t *) virt_addr) = writeval;
                 break;
+            case 8:
+                *((volatile uint64_t *) virt_addr) = writeval;
+                break;
         }
 
         if (f_dbg) {
@@ -237,6 +243,9 @@ int main(int argc, char **argv)
                 break;
             case 4:
                 read_result = *((volatile uint32_t *) virt_addr);
+                break;
+            case 8:
+                read_result = *((volatile uint64_t *) virt_addr);
                 break;
         }
 
