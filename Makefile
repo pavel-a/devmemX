@@ -11,6 +11,7 @@ SRC=devmem2.c
 
 devmem2: $(SRC)
 	$(CC) $(CFLAGS) $(LDFLAGS) $(LIBS) -o $@ $(SRC)
+	objdump -d -M intel -SlW $@ > list.s
 
 # Install as "devmem2"
 install:
